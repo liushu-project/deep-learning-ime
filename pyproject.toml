@@ -1,0 +1,15 @@
+[project]
+name = "seq2seq-ime"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.4.4",
+    "pypinyin>=0.55.0",
+    "regex>=2026.3.32",
+    "tensorboard>=2.20.0",
+    "torch>=2.11.0",
+    "tqdm>=4.67.3",
+    "xpinyin>=0.7.7",
+]
