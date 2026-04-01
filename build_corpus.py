@@ -2,8 +2,9 @@ import re
 import os
 from xpinyin import Pinyin
 
+pinyin = Pinyin()
+
 def align(sent):
-    pinyin = Pinyin()
     pnyns = pinyin.get_pinyin(sent, " ").split()
 
     hanzis = []
