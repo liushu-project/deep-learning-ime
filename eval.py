@@ -39,24 +39,22 @@ def eval_interactive():
 
     print("\n" + "="*30)
     print("拼音输入法模型已就绪！")
-    print("输入拼音 (如: 'wo ai bei jing')，按回车推理。")
+    print("输入拼音 (如: 'woaibeijing')，按回车推理。")
     print("输入 'q' 或 'quit' 退出程序。")
     print("="*30 + "\n")
 
     while True:
         line = input("拼音输入 >> ").strip().lower()
-        
         if line in ['q', 'quit']:
             break
         if not line:
             continue
 
-        # 3. 预处理输入：拼音 -> 索引 ID
-        # 假设你的模型训练时是按空格切分拼音单词的
-        words = line.split()
-        # 将拼音转换为 ID，不在词表里的用 <UNK> (假设 ID 为 1) 替代
-        # 并根据 hp.maxlen 进行填充 (Padding)
-        x_ids = [pnyn2idx.get(w, 1) for w in words]
+        # 将输入字符串转换为单个字母列表（与原 TensorFlow 行为一致）
+        pnyn_sent = list(line)          # e.g. "woaibeijing" -> ['w','o','a','i','b','e','i','j','i','n','g']
+        x_ids = [pnyn2idx.get(ch, 1) for ch in pnyn_sent]   # 1 表示 OOV（未知字母）
+
+        # 填充或截断到 maxlen
         if len(x_ids) < hp.maxlen:
             x_ids += [0] * (hp.maxlen - len(x_ids))
         else:
@@ -64,24 +62,25 @@ def eval_interactive():
 
         x_tensor = torch.LongTensor([x_ids]).to(device)
 
-        # 4. 模型推理
         with torch.no_grad():
-            preds = model(x_tensor) # 返回 (1, T) 的 tensor
-        
-        # 5. 后处理：ID -> 汉字
-        res_ids = preds[0].detach().cpu().numpy()
-        res_chars = []
-        for i, idx in enumerate(res_ids):
-            # 遇到 padding (0) 就停止或者跳过
-            if idx == 0: continue 
-            # 对应的拼音位置超出了输入长度也停止
-            if i >= len(words): break
-            
-            char = idx2hanzi.get(str(idx), "")
-            res_chars.append(char)
+            preds = model(x_tensor)   # 假设输出形状 (1, T)
 
-        print(f"模型输出 << {''.join(res_chars)}")
-        print("-" * 20)
+        # 后处理：获取有效长度（非填充的输入字母个数）
+        valid_len = np.count_nonzero(x_ids)   # 原 TensorFlow 使用 np.count_nonzero(xx)
+        res_ids = preds[0].detach().cpu().numpy()
+
+        # 转换为汉字，遇到 padding (0) 停止，且不超过 valid_len
+        got_chars = []
+        for i, idx in enumerate(res_ids):
+            if idx == 0 or i >= valid_len:
+                break
+            char = idx2hanzi.get(str(idx), "")   # 注意 key 可能需要字符串形式
+            if char == "_":                      # 原代码替换 "_" 为空
+                continue
+            got_chars.append(char)
+
+        got = "".join(got_chars)
+        print(f"模型输出 << {got}")
 
 if __name__ == "__main__":
     eval_interactive()
