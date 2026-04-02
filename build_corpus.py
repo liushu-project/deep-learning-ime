@@ -4,6 +4,7 @@ from xpinyin import Pinyin
 
 pinyin = Pinyin()
 
+
 def align(sent):
     pnyns = pinyin.get_pinyin(sent, " ").split()
 
@@ -14,8 +15,11 @@ def align(sent):
     pnyns = "".join(pnyns)
     hanzis = "".join(hanzis)
 
-    assert len(pnyns) == len(hanzis), "The hanzis and the pinyins must be the same in length."
+    assert len(pnyns) == len(hanzis), (
+        "The hanzis and the pinyins must be the same in length."
+    )
     return pnyns, hanzis
+
 
 def clean(text):
     """清理文本，仅保留汉字、空格和指定标点"""
@@ -25,6 +29,7 @@ def clean(text):
     # 仅保留汉字范围 \u4e00-\u9fa5 以及指定的标点符号
     text = re.sub(r"[^\u4e00-\u9fa5。，！？ ]", "", text)
     return text.strip()
+
 
 def build_corpus():
     os.makedirs("data", exist_ok=True)
@@ -36,8 +41,8 @@ def build_corpus():
         print(f"错误: 找不到输入文件 {input_file}")
         return
 
-    with open(output_file, 'w', encoding='utf-8') as fout:
-        with open(input_file, 'r', encoding='utf-8') as fin:
+    with open(output_file, "w", encoding="utf-8") as fout:
+        with open(input_file, "r", encoding="utf-8") as fin:
             for i, line in enumerate(fin, 1):
                 try:
                     parts = line.strip().split("\t")
@@ -58,6 +63,7 @@ def build_corpus():
 
                 if i % 10000 == 0:
                     print(f"已处理 {i} 行...")
+
 
 if __name__ == "__main__":
     print("开始处理语料...")

@@ -8,6 +8,7 @@ import hyperparams as hp
 from data_load import get_batch, load_vocab_json
 from model import Graph
 
+
 def train():
     # Load vocabulary for sizes
     pnyn2idx, _, hanzi2idx, _ = load_vocab_json()
@@ -46,7 +47,9 @@ def train():
         epoch_loss = 0.0
         epoch_acc = 0.0
 
-        pbar = tqdm(enumerate(dataloader), total=num_batch, desc=f"Epoch {epoch}", unit="b")
+        pbar = tqdm(
+            enumerate(dataloader), total=num_batch, desc=f"Epoch {epoch}", unit="b"
+        )
         for step, (x, y) in pbar:
             x = x.to(device)
             y = y.to(device)
@@ -61,26 +64,34 @@ def train():
             global_step += 1
 
             pbar.set_postfix(loss=loss.item(), acc=acc.item())
-            writer.add_scalar('train/loss', loss.item(), global_step)
-            writer.add_scalar('train/acc', acc.item(), global_step)
+            writer.add_scalar("train/loss", loss.item(), global_step)
+            writer.add_scalar("train/acc", acc.item(), global_step)
 
         avg_loss = epoch_loss / num_batch
         avg_acc = epoch_acc / num_batch
-        print(f"Epoch {epoch} completed: avg_loss = {avg_loss:.4f}, avg_acc = {avg_acc:.4f}")
+        print(
+            f"Epoch {epoch} completed: avg_loss = {avg_loss:.4f}, avg_acc = {avg_acc:.4f}"
+        )
 
-        checkpoint_path = os.path.join(hp.logdir, f'model_epoch_{epoch:02d}_gs_{global_step}.pth')
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'global_step': global_step,
-            'loss': avg_loss,
-            'acc': avg_acc,
-        }, checkpoint_path)
+        checkpoint_path = os.path.join(
+            hp.logdir, f"model_epoch_{epoch:02d}_gs_{global_step}.pth"
+        )
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "global_step": global_step,
+                "loss": avg_loss,
+                "acc": avg_acc,
+            },
+            checkpoint_path,
+        )
         print(f"Checkpoint saved to {checkpoint_path}")
 
     writer.close()
     print("Training completed.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     train()

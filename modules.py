@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import hyperparams as hp
 
+
 class Embedding(nn.Module):
     def __init__(self, vocab_size, num_units, zero_pad=True):
         super().__init__()
@@ -16,15 +17,23 @@ class Embedding(nn.Module):
 
 
 class Conv1d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, dilation=1, padding='same', bias=False):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        dilation=1,
+        padding="same",
+        bias=False,
+    ):
         super().__init__()
         self.kernel_size = kernel_size
         self.dilation = dilation
-        if padding == 'same':
+        if padding == "same":
             effective_kernel = (kernel_size - 1) * dilation + 1
             self.pad_left = (effective_kernel - 1) // 2
             self.pad_right = effective_kernel - 1 - self.pad_left
-        elif padding == 'causal':
+        elif padding == "causal":
             pad_len = (kernel_size - 1) * dilation
             self.pad_left = pad_len
             self.pad_right = 0
@@ -32,8 +41,15 @@ class Conv1d(nn.Module):
             self.pad_left = 0
             self.pad_right = 0
 
-        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size,
-                              stride=1, padding=0, dilation=dilation, bias=bias)
+        self.conv = nn.Conv1d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=1,
+            padding=0,
+            dilation=dilation,
+            bias=bias,
+        )
 
     def forward(self, x):
         # x: (N, T, C)
@@ -61,9 +77,9 @@ class Normalize(nn.Module):
     def forward(self, x, activation_fn=None):
         # x: (N, T, C)
         if self.norm_type in ("bn", "ins"):
-            x = x.transpose(1, 2)   # (N, C, T)
+            x = x.transpose(1, 2)  # (N, C, T)
             x = self.norm(x)
-            x = x.transpose(1, 2)   # (N, T, C)
+            x = x.transpose(1, 2)  # (N, T, C)
         else:  # ln or identity
             x = self.norm(x)
         if activation_fn is not None:
@@ -77,8 +93,8 @@ class Conv1dBanks(nn.Module):
         self.K = K
         self.num_units = num_units
         self.convs = nn.ModuleList()
-        for k in range(1, K+1):
-            self.convs.append(Conv1d(in_channels, num_units, k, padding='same'))
+        for k in range(1, K + 1):
+            self.convs.append(Conv1d(in_channels, num_units, k, padding="same"))
         self.norm = Normalize(num_units * K, norm_type)
 
     def forward(self, x):
@@ -114,14 +130,16 @@ class HighwayNet(nn.Module):
     def forward(self, inputs):
         H = torch.relu(self.linear_H(inputs))
         T = torch.sigmoid(self.linear_T(inputs))
-        C = 1. - T
+        C = 1.0 - T
         return H * T + inputs * C
 
 
 class GRU(nn.Module):
     def __init__(self, input_size, hidden_size, bidirectional=False):
         super().__init__()
-        self.gru = nn.GRU(input_size, hidden_size, batch_first=True, bidirectional=bidirectional)
+        self.gru = nn.GRU(
+            input_size, hidden_size, batch_first=True, bidirectional=bidirectional
+        )
 
     def forward(self, inputs, seqlen=None):
         outputs, _ = self.gru(inputs)

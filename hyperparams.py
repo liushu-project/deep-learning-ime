@@ -10,4 +10,3 @@ lr = 0.0001
 logdir = "log/qwerty" if isqwerty else "log/nine"
 batch_size = 200
 num_epochs = 30
-
