@@ -36,10 +36,22 @@ class Decoder(nn.Module):
 
 
 class EncoderDecoder(nn.Module):
-    def __init__(self, encoder, decoder, **kwargs):
+    def __init__(self, encoder, decoder, init_weights: bool = True, **kwargs):
         super(EncoderDecoder, self).__init__(**kwargs)
         self.encoder = encoder
         self.decoder = decoder
+        if init_weights:
+            for m in self.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0)
+                elif isinstance(m, (nn.RNN, nn.GRU, nn.LSTM)):
+                    for name, param in m.named_parameters():
+                        if 'weight' in name:
+                            nn.init.xavier_uniform_(param)
+                        elif 'bias' in name:
+                            nn.init.constant_(param, 0)
 
     def forward(self, enc_X, dec_X):
         enc_outputs = self.encoder(enc_X)
