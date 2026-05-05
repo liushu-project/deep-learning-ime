@@ -7,12 +7,11 @@ class Encoder(nn.Module):
                  dropout: float = 0):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.rnn = nn.GRU(embed_size, hidden_size, num_layers, dropout=dropout)
+        self.rnn = nn.GRU(embed_size, hidden_size, num_layers, dropout=dropout, batch_first=True)
 
     def forward(self, X):
-        X = self.embedding(X)
-        X = X.permute(1, 0, 2)
-        output, state = self.rnn(X)
+        X = self.embedding(X) # (batch, seq, embed)
+        output, state = self.rnn(X) # output: (batch, seq, hidden)
         return output, state
 
 class Decoder(nn.Module):
@@ -20,18 +19,20 @@ class Decoder(nn.Module):
                  dropout: float = 0):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.rnn = nn.GRU(embed_size + hidden_size, hidden_size, num_layers, dropout=dropout)
+        self.rnn = nn.GRU(embed_size + hidden_size, hidden_size, num_layers, dropout=dropout, batch_first=True)
         self.dense = nn.Linear(hidden_size, vocab_size)
 
     def init_state(self, enc_outputs):
-        return enc_outputs[1]
+        return enc_outputs[1] # (num_layers, batch, hidden)
 
     def forward(self, X, state):
-        X = self.embedding(X).permute(1, 0, 2)
-        context = state[-1].repeat(X.shape[0], 1, 1)
-        X_and_context = torch.cat((X, context), 2)
-        output, state = self.rnn(X_and_context, state)
-        output = self.dense(output).permute(1, 0, 2)
+        X = self.embedding(X) # (batch, seq, embed)
+        # 上下文向量: 取最后一层隐状态，并扩展到每个时间步
+        context = state[-1].unsqueeze(1) # (batch, 1, hidden)
+        context = context.repeat(1, X.shape[1], 1) # (batch, seq, hidden)
+        X_and_context = torch.cat((X, context), dim=2) # (batch, seq, embed+hidden)
+        output, state = self.rnn(X_and_context, state) # output: (batch, seq, hidden)
+        output = self.dense(output) # (batch, seq, vocab)
         return output, state
 
 

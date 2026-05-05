@@ -206,7 +206,7 @@ if __name__ == '__main__':
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    num_epochs, lr = 300, 0.005
+    num_epochs, lr = 30, 0.005
     train(net, data_iter, lr, num_epochs, target_vocab, device)
 
     # 简单测试
