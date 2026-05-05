@@ -1,4 +1,4 @@
-from models.rnn import Encoder, Decoder, EncoderDecoder
+from models.gru import BiGRU
 from typing import Iterator
 from utils.vocabulary import LazyVocabulary
 import time
@@ -113,11 +113,11 @@ class Accumulator:
     def __getitem__(self, idx):
         return self.data[idx]
 
-def train(net: EncoderDecoder, data_iter, lr, num_epochs, tgt_vocab, device):
+def train(net: BiGRU, data_iter, lr, num_epochs, tgt_vocab, device):
     net.to(device)
     optimizer = torch.optim.Adam(net.parameters(), lr=lr)
 
-    # 核心改进：直接使用 ignore_index 屏蔽 <pad> 的损失计算
+    # 依然利用 ignore_index 屏蔽 <pad> 的损失
     pad_id = tgt_vocab.get_id('<pad>')
     loss_fn = nn.CrossEntropyLoss(ignore_index=pad_id)
 
@@ -127,54 +127,49 @@ def train(net: EncoderDecoder, data_iter, lr, num_epochs, tgt_vocab, device):
         metric = Accumulator(2)
         for batch in data_iter:
             optimizer.zero_grad()
+            # X: 拼音序列, Y: 对应的汉字序列
             X, X_valid_len, Y, Y_valid_len = [x.to(device) for x in batch]
 
-            # 准备 Decoder 输入 (Teacher Forcing)
-            sos = torch.tensor([tgt_vocab.get_id('<sos>')] * Y.shape[0], device=device).reshape(-1, 1)
-            dec_input = torch.cat([sos, Y[:, :-1]], 1)
+            # 直接前向传播
+            logits = net(X, X_valid_len)
 
-            Y_hat, _ = net(X, X_valid_len, dec_input)
-
-            # 核心改进：展平后再计算 Loss，ignore_index 会自动处理 Padding
-            l = loss_fn(Y_hat.reshape(-1, Y_hat.shape[-1]), Y.reshape(-1))
+            # 计算 Loss: 展平 (batch * seq_len, vocab_size) vs (batch * seq_len)
+            l = loss_fn(logits.reshape(-1, logits.shape[-1]), Y.reshape(-1))
 
             l.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
             optimizer.step()
 
             with torch.no_grad():
-                # 计算有效 token 数量进行监控
                 num_tokens = Y_valid_len.sum()
                 metric.add(l.item() * num_tokens, num_tokens)
 
-        print(f'epoch {epoch+1}: loss {metric[0] / metric[1]:.3f}, {metric[1] / timer.stop():.1f} tokens/sec')
+        print(f'epoch {epoch+1}: loss {metric[0] / metric[1]:.4f}, {metric[1] / timer.stop():.1f} tokens/sec')
 
 def predict(net, test_tokens, src_vocab, tgt_vocab, num_steps, device):
     net.eval()
-    test_ids, enc_valid_len_val = build_ids(src_vocab, test_tokens, num_steps)
+    # 使用之前的 build_ids 处理输入
+    test_ids, valid_len_val = build_ids(src_vocab, test_tokens, num_steps)
 
-    enc_X = torch.tensor([test_ids], dtype=torch.long, device=device)
-    enc_valid_len = torch.tensor([enc_valid_len_val], device=device)
+    X = torch.tensor([test_ids], device=device)
+    L = torch.tensor([valid_len_val], device=device)
 
     with torch.no_grad():
-        enc_outputs = net.encoder(enc_X, enc_valid_len)
-        dec_state = net.decoder.init_state(enc_outputs)
+        logits = net(X, L)
+        # 获取概率最大的 token ID
+        preds = logits.argmax(dim=2).squeeze(0)
 
-        dec_X = torch.tensor([[tgt_vocab.get_id('<sos>')]], dtype=torch.long, device=device)
-        output_seq = []
-        for _ in range(num_steps):
-            Y, dec_state = net.decoder(dec_X, dec_state)
-            dec_X = Y.argmax(dim=2)
-            pred = dec_X.squeeze().item()
-            if pred == tgt_vocab.get_id('<eos>'):
-                break
-            output_seq.append(pred)
+        # 只截取有效长度部分并转为词元
+        output_ids = preds[:valid_len_val].tolist()
 
-    return tgt_vocab.decode(output_seq)
+        # 过滤掉辅助词元
+        res_ids = [idx for idx in output_ids if idx not in [tgt_vocab.get_id('<pad>'), tgt_vocab.get_id('<eos>'), tgt_vocab.get_id('<sos>')]]
+
+    return tgt_vocab.decode(res_ids)
 
 
 if __name__ == '__main__':
-    embed_size, hidden_size, num_layers, dropout = 64, 64, 2, 0.1
+    src_embed_size, hidden_size, num_layers = 128, 256, 2
     batch_size, num_steps = 64, 10
     data_iter, source_vocab, target_vocab = load_data('./data/pinyin-zh-small.txt', batch_size, num_steps)
 
@@ -182,9 +177,13 @@ if __name__ == '__main__':
     src_vocab_size = len(source_vocab)
     tgt_vocab_size = len(target_vocab)
 
-    encoder = Encoder(src_vocab_size, embed_size, hidden_size, num_layers, dropout)
-    decoder = Decoder(tgt_vocab_size, embed_size, hidden_size, num_layers, dropout)
-    net = EncoderDecoder(encoder, decoder)
+    net = BiGRU(
+        src_vocab_size,
+        src_embed_size,
+        hidden_size,
+        num_layers,
+        tgt_vocab_size
+    )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
