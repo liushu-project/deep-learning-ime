@@ -1,5 +1,5 @@
 [project]
-name = "seq2seq-ime"
+name = "deep-learning-ime"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
