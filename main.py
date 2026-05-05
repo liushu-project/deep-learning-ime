@@ -113,86 +113,68 @@ class Accumulator:
     def __getitem__(self, idx):
         return self.data[idx]
 
-def sequence_mask(X, valid_len, value=0):
-    """在序列中屏蔽不相关的项"""
-    maxlen = X.size(1)
-    mask = torch.arange((maxlen), dtype=torch.float32,
-                        device=X.device)[None, :] < valid_len[:, None]
-    X[~mask] = value
-    return X
-
-class MaskedSoftmaxCELoss(nn.CrossEntropyLoss):
-    """带遮蔽的softmax交叉熵损失函数"""
-    # pred的形状：(batch_size,num_steps,vocab_size)
-    # label的形状：(batch_size,num_steps)
-    # valid_len的形状：(batch_size,)
-    def forward(self, pred, label, valid_len):
-        weights = torch.ones_like(label)
-        weights = sequence_mask(weights, valid_len)
-        self.reduction='none'
-        unweighted_loss = super(MaskedSoftmaxCELoss, self).forward(
-            pred.permute(0, 2, 1), label)
-        weighted_loss = (unweighted_loss * weights).mean(dim=1)
-        return weighted_loss
-
-def train(net: EncoderDecoder, data_iter, lr, num_epochs, tgt_vocab: LazyVocabulary, device):
+def train(net: EncoderDecoder, data_iter, lr, num_epochs, tgt_vocab, device):
     net.to(device)
     optimizer = torch.optim.Adam(net.parameters(), lr=lr)
-    loss = MaskedSoftmaxCELoss()
+
+    # 核心改进：直接使用 ignore_index 屏蔽 <pad> 的损失计算
+    pad_id = tgt_vocab.get_id('<pad>')
+    loss_fn = nn.CrossEntropyLoss(ignore_index=pad_id)
+
     net.train()
     for epoch in range(num_epochs):
         timer = Timer()
-        metric = Accumulator(2)  # 训练损失总和，词元数量
+        metric = Accumulator(2)
         for batch in data_iter:
             optimizer.zero_grad()
             X, X_valid_len, Y, Y_valid_len = [x.to(device) for x in batch]
-            sos = torch.tensor([tgt_vocab.get_id('<sos>')] * Y.shape[0],
-                          device=device).reshape(-1, 1)
-            dec_input = torch.cat([sos, Y[:, :-1]], 1)  # 强制教学
-            Y_hat, _ = net(X, dec_input)
-            l = loss(Y_hat, Y, Y_valid_len)
-            l.sum().backward()      # 损失函数的标量进行“反向传播”
-            torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
-            num_tokens = Y_valid_len.sum()
-            optimizer.step()
-            with torch.no_grad():
-                metric.add(l.sum(), num_tokens)
-    print(f'loss {metric[0] / metric[1]:.3f}, {metric[1] / timer.stop():.1f} '
-        f'tokens/sec on {str(device)}')
 
-def predict(net, test_tokens: list[str], src_vocab: LazyVocabulary, tgt_vocab: LazyVocabulary,
-            num_steps: int, device, save_attention_weights=False):
-    """序列到序列模型的预测"""
-    # 在预测时将net设置为评估模式
+            # 准备 Decoder 输入 (Teacher Forcing)
+            sos = torch.tensor([tgt_vocab.get_id('<sos>')] * Y.shape[0], device=device).reshape(-1, 1)
+            dec_input = torch.cat([sos, Y[:, :-1]], 1)
+
+            Y_hat, _ = net(X, X_valid_len, dec_input)
+
+            # 核心改进：展平后再计算 Loss，ignore_index 会自动处理 Padding
+            l = loss_fn(Y_hat.reshape(-1, Y_hat.shape[-1]), Y.reshape(-1))
+
+            l.backward()
+            torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
+            optimizer.step()
+
+            with torch.no_grad():
+                # 计算有效 token 数量进行监控
+                num_tokens = Y_valid_len.sum()
+                metric.add(l.item() * num_tokens, num_tokens)
+
+        print(f'epoch {epoch+1}: loss {metric[0] / metric[1]:.3f}, {metric[1] / timer.stop():.1f} tokens/sec')
+
+def predict(net, test_tokens, src_vocab, tgt_vocab, num_steps, device):
     net.eval()
-    test_ids, enc_valid_len = build_ids(src_vocab, test_tokens, num_steps)
-    enc_valid_len = torch.tensor([enc_valid_len], device=device)
-    # 添加批量轴
-    enc_X = torch.unsqueeze(
-        torch.tensor(test_ids, dtype=torch.long, device=device), dim=0)
-    enc_outputs = net.encoder(enc_X)
-    dec_state = net.decoder.init_state(enc_outputs)
-    # 添加批量轴
-    dec_X = torch.unsqueeze(torch.tensor(
-        [tgt_vocab.get_id('<sos>')], dtype=torch.long, device=device), dim=0)
-    output_seq, attention_weight_seq = [], []
-    for _ in range(num_steps):
-        Y, dec_state = net.decoder(dec_X, dec_state)
-        # 我们使用具有预测最高可能性的词元，作为解码器在下一时间步的输入
-        dec_X = Y.argmax(dim=2)
-        pred = dec_X.squeeze(dim=0).type(torch.int32).item()
-        # 保存注意力权重（稍后讨论）
-        if save_attention_weights:
-            attention_weight_seq.append(net.decoder.attention_weights)
-        # 一旦序列结束词元被预测，输出序列的生成就完成了
-        if pred == tgt_vocab.get_id('<eos>'):
-            break
-        output_seq.append(pred)
-    return tgt_vocab.decode(output_seq), attention_weight_seq
+    test_ids, enc_valid_len_val = build_ids(src_vocab, test_tokens, num_steps)
+
+    enc_X = torch.tensor([test_ids], dtype=torch.long, device=device)
+    enc_valid_len = torch.tensor([enc_valid_len_val], device=device)
+
+    with torch.no_grad():
+        enc_outputs = net.encoder(enc_X, enc_valid_len)
+        dec_state = net.decoder.init_state(enc_outputs)
+
+        dec_X = torch.tensor([[tgt_vocab.get_id('<sos>')]], dtype=torch.long, device=device)
+        output_seq = []
+        for _ in range(num_steps):
+            Y, dec_state = net.decoder(dec_X, dec_state)
+            dec_X = Y.argmax(dim=2)
+            pred = dec_X.squeeze().item()
+            if pred == tgt_vocab.get_id('<eos>'):
+                break
+            output_seq.append(pred)
+
+    return tgt_vocab.decode(output_seq)
 
 
 if __name__ == '__main__':
-    embed_size, hidden_size, num_layers, dropout = 32, 32, 2, 0.1
+    embed_size, hidden_size, num_layers, dropout = 64, 64, 2, 0.1
     batch_size, num_steps = 64, 10
     data_iter, source_vocab, target_vocab = load_data('./data/pinyin-zh-small.txt', batch_size, num_steps)
 
