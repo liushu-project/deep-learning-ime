@@ -11,5 +11,4 @@ dependencies = [
     "tensorboard>=2.20.0",
     "torch>=2.11.0",
     "tqdm>=4.67.3",
-    "xpinyin>=0.7.7",
 ]

@@ -98,7 +98,6 @@ dependencies = [
     { name = "tensorboard" },
     { name = "torch" },
     { name = "tqdm" },
-    { name = "xpinyin" },
 ]
 
 [package.metadata]
@@ -109,7 +108,6 @@ requires-dist = [
     { name = "tensorboard", specifier = ">=2.20.0" },
     { name = "torch", specifier = ">=2.11.0" },
     { name = "tqdm", specifier = ">=4.67.3" },
-    { name = "xpinyin", specifier = ">=0.7.7" },
 ]
 
 [[package]]
@@ -750,13 +748,4 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b5/43/76ded108b296a49f52de6bac5192ca1c4be84e886f9b5c9ba8427d9694fd/werkzeug-3.1.7.tar.gz", hash = "sha256:fb8c01fe6ab13b9b7cdb46892b99b1d66754e1d7ab8e542e865ec13f526b5351", size = 875700, upload-time = "2026-03-24T01:08:07.687Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7f/b2/0bba9bbb4596d2d2f285a16c2ab04118f6b957d8441566e1abb892e6a6b2/werkzeug-3.1.7-py3-none-any.whl", hash = "sha256:4b314d81163a3e1a169b6a0be2a000a0e204e8873c5de6586f453c55688d422f", size = 226295, upload-time = "2026-03-24T01:08:06.133Z" },
-]
-
-[[package]]
-name = "xpinyin"
-version = "0.7.7"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/6e/3e/41397274f9447ba29a947778b669b6f21717839ed164eba6b68cd168e705/xpinyin-0.7.7.tar.gz", hash = "sha256:89a1f3f12c7119b4526b93360a74fbe48ee24847481a4bab3b4fee8f4536079d", size = 133954, upload-time = "2025-06-02T04:02:11.107Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/82/bd/f7865b810ca7cc82fa566ec224786f674aab878d89866370ea7a20063b4c/xpinyin-0.7.7-py3-none-any.whl", hash = "sha256:1317a0140b704e03e5f368c2dc7618887a2fc45cdc288b6d648e2ebabf571f0e", size = 129774, upload-time = "2025-06-02T04:02:08.354Z" },
 ]
