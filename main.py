@@ -1,193 +1,209 @@
-from config import Config
-from models.gru import BiGRU
-from typing import Iterator
-from utils.vocabulary import LazyVocabulary
-import time
-import math
+from models.labeling.rnn import SimpleRnnTagger
+from collections import Counter
 import torch
 from torch import nn
-from torch.utils.data import TensorDataset, DataLoader
-import numpy as np
+from torch.utils.data import TensorDataset, DataLoader, Dataset, random_split
 import csv
 
-def load_data(file_path: str, batch_size: int, num_steps: int):
-    source_vocab = LazyVocabulary(reserved_tokens=['<unk>', '<pad>', '<sos>', '<eos>'])
-    target_vocab = LazyVocabulary(reserved_tokens=['<unk>', '<pad>', '<sos>', '<eos>'])
+from config import Config
 
-    raw_source_seqs = []
-    raw_target_seqs = []
-
-    with open(file_path, mode='r', encoding='utf-8') as f:
-        reader = csv.reader(f, delimiter='\t')
-        for row in reader:
-            source_tokens = row[0].split(' ')
-            target_tokens = row[1].split(' ')
-            raw_source_seqs.append(source_tokens)
-            raw_target_seqs.append(target_tokens)
-
-            for token in source_tokens:
-                source_vocab.append(token)
-            for token in target_tokens:
-                target_vocab.append(token)
-
-    total_samples = len(raw_source_seqs)
-    if total_samples == 0:
-        raise RuntimeError("No data loaded. Check file path and format.")
-    print(f"Loaded {total_samples} samples.")
-
-    src_data = []
-    src_len = []
-    tgt_data = []
-    tgt_len = []
-
-    for src_tokens, tgt_tokens in zip(raw_source_seqs, raw_target_seqs):
-        src_ids, src_valid_len = build_ids(source_vocab, src_tokens, num_steps)
-        tgt_ids, tgt_valid_len = build_ids(target_vocab, tgt_tokens, num_steps)
-        src_data.append(src_ids)
-        src_len.append(src_valid_len)
-        tgt_data.append(tgt_ids)
-        tgt_len.append(tgt_valid_len)
-
-    src_tensor = torch.tensor(src_data, dtype=torch.long)
-    src_len_tensor = torch.tensor(src_len, dtype=torch.long)
-    tgt_tensor = torch.tensor(tgt_data, dtype=torch.long)
-    tgt_len_tensor = torch.tensor(tgt_len, dtype=torch.long)
-
-    dataset = TensorDataset(src_tensor, src_len_tensor, tgt_tensor, tgt_len_tensor)
-    data_iter = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-    return data_iter, source_vocab, target_vocab
-
-def build_ids(vocab: LazyVocabulary, tokens: list[str], max_len: int) -> tuple[list[int], int]:
-    pad_id = vocab.get_id('<pad>')
-    eos_id = vocab.get_id('<eos>')
-    ids = vocab.encode(tokens) + [eos_id]
-    valid_len = min(len(ids), max_len)
-    return pad_or_truncate(ids, max_len, pad_id), valid_len
-
-def pad_or_truncate(seq_ids: list[int], max_len: int, pad_id: int) -> list[int]:
-    if len(seq_ids) > max_len:
-        return seq_ids[:max_len]
-    else:
-        return seq_ids + [pad_id] * (max_len - len(seq_ids))
-
-class Timer:
-    """Record multiple running times."""
+class Vocabulary:
     def __init__(self):
-        """Defined in :numref:`sec_minibatch_sgd`"""
-        self.times = []
-        self.start()
+        self.id_to_token = ['<pad>']
+        self.token_to_id = {token: idx for idx, token in enumerate(self.id_to_token)}
+        self.pad_id = self.token_to_id['<pad>']
 
-    def start(self):
-        """Start the timer."""
-        self.tik = time.time()
+    def add_token(self, token: str):
+        if token not in self.token_to_id:
+            idx = len(self.id_to_token)
+            self.token_to_id[token] = idx
+            self.id_to_token.append(token)
 
-    def stop(self):
-        """Stop the timer and record the time in a list."""
-        self.times.append(time.time() - self.tik)
-        return self.times[-1]
+    def __len__(self):
+        return len(self.id_to_token)
 
-    def avg(self):
-        """Return the average time."""
-        return sum(self.times) / len(self.times)
+    def encode(self, tokens: list[str]) -> list[int]:
+        return [self.token_to_id[token] for token in tokens]
 
-    def sum(self):
-        """Return the sum of time."""
-        return sum(self.times)
+    def decode(self, ids: list[int]) -> list[str]:
+        return [self.id_to_token[i] for i in ids]
 
-    def cumsum(self):
-        """Return the accumulated time."""
-        return np.array(self.times).cumsum().tolist()
+def build_vocab_from_data(data: list[tuple[list[str], list[str]]], min_freq=1) -> tuple[Vocabulary, Vocabulary]:
+    """从数据中构建拼音和汉字词汇表"""
+    pinyin_counter = Counter()
+    han_counter = Counter()
+    for pinyin_seq, han_seq in data:
+        pinyin_counter.update(pinyin_seq)
+        han_counter.update(han_seq)
 
-class Accumulator:
-    """For accumulating sums over `n` variables."""
-    def __init__(self, n):
-        """Defined in :numref:`sec_utils`"""
-        self.data = [0.0] * n
+    pinyin_vocab = Vocabulary()
+    han_vocab = Vocabulary()
 
-    def add(self, *args):
-        self.data = [a + float(b) for a, b in zip(self.data, args)]
+    # 添加高频词
+    for token, freq in pinyin_counter.items():
+        if freq >= min_freq:
+            pinyin_vocab.add_token(token)
+    for token, freq in han_counter.items():
+        if freq >= min_freq:
+            han_vocab.add_token(token)
 
-    def reset(self):
-        self.data = [0.0] * len(self.data)
+    return pinyin_vocab, han_vocab
 
-    def __getitem__(self, idx):
-        return self.data[idx]
+def read_data(file_path: str) -> tuple[list[list[str]], list[list[str]]]:
+    """返回 (pinyin_sequences, han_sequences) 列表"""
+    pinyin_seqs = []
+    han_seqs = []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split('\t')
+            if len(parts) != 2:
+                continue
+            pinyin_tokens = parts[0].strip().split()
+            han_tokens = parts[1].strip().split()
+            # 确保长度相等
+            if len(pinyin_tokens) != len(han_tokens):
+                print(f"警告：长度不一致，跳过该行: {line}")
+                continue
+            pinyin_seqs.append(pinyin_tokens)
+            han_seqs.append(han_tokens)
+    return pinyin_seqs, han_seqs
 
-def train(net: BiGRU, data_iter, lr, num_epochs, tgt_vocab, device):
-    net.to(device)
-    optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+class PinyinHanDataset(Dataset):
+    def __init__(self, pinyin_seqs: list[list[str]], han_seqs: list[list[str]],
+                 pinyin_vocab: Vocabulary, han_vocab: Vocabulary):
+        self.pinyin_seqs = pinyin_seqs
+        self.han_seqs = han_seqs
+        self.pinyin_vocab = pinyin_vocab
+        self.han_vocab = han_vocab
 
-    # 依然利用 ignore_index 屏蔽 <pad> 的损失
-    pad_id = tgt_vocab.get_id('<pad>')
-    loss_fn = nn.CrossEntropyLoss(ignore_index=pad_id)
+    def __len__(self):
+        return len(self.pinyin_seqs)
 
-    net.train()
-    for epoch in range(num_epochs):
-        timer = Timer()
-        metric = Accumulator(2)
-        for batch in data_iter:
-            optimizer.zero_grad()
-            # X: 拼音序列, Y: 对应的汉字序列
-            X, X_valid_len, Y, Y_valid_len = [x.to(device) for x in batch]
+    def __getitem__(self, index):
+        pinyin_tokens = self.pinyin_seqs[index]
+        han_tokens = self.han_seqs[index]
+        pinyin_ids = self.pinyin_vocab.encode(pinyin_tokens)
+        han_ids = self.han_vocab.encode(han_tokens)
+        # 返回原始长度（用于后续 padding）
+        return torch.tensor(pinyin_ids, dtype=torch.long), torch.tensor(han_ids, dtype=torch.long)
 
-            # 直接前向传播
-            logits = net(X, X_valid_len)
+def collate_fn(batch):
+    """batch: list of (pinyin_ids, han_ids) tensors of varying lengths"""
+    pinyin_list, han_list = zip(*batch)
+    # 计算当前批次最大长度
+    max_len = max(p.size(0) for p in pinyin_list)
+    pad_id = 0  # 我们约定 <pad> id 为 0
 
-            # 计算 Loss: 展平 (batch * seq_len, vocab_size) vs (batch * seq_len)
-            l = loss_fn(logits.reshape(-1, logits.shape[-1]), Y.reshape(-1))
+    padded_pinyin = []
+    padded_han = []
+    masks = []  # 标记有效位置（True=有效，False=padding）
 
-            l.backward()
-            torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
-            optimizer.step()
+    for p, h in zip(pinyin_list, han_list):
+        cur_len = p.size(0)
+        # pad 到 max_len
+        p_pad = torch.cat([p, torch.full((max_len - cur_len,), pad_id, dtype=torch.long)])
+        h_pad = torch.cat([h, torch.full((max_len - cur_len,), pad_id, dtype=torch.long)])
+        mask = torch.cat([torch.ones(cur_len, dtype=torch.bool),
+                          torch.zeros(max_len - cur_len, dtype=torch.bool)])
+        padded_pinyin.append(p_pad)
+        padded_han.append(h_pad)
+        masks.append(mask)
 
-            with torch.no_grad():
-                num_tokens = Y_valid_len.sum()
-                metric.add(l.item() * num_tokens, num_tokens)
+    return torch.stack(padded_pinyin), torch.stack(padded_han), torch.stack(masks)
 
-        print(f'epoch {epoch+1}: loss {metric[0] / metric[1]:.4f}, {metric[1] / timer.stop():.1f} tokens/sec')
+def train_epoch(model, dataloader, optimizer, criterion, device):
+    model.train()
+    total_loss = 0
+    total_tokens = 0
+    correct = 0
 
-def predict(net, test_tokens, src_vocab, tgt_vocab, num_steps, device):
-    net.eval()
-    # 使用之前的 build_ids 处理输入
-    test_ids, valid_len_val = build_ids(src_vocab, test_tokens, num_steps)
+    for pinyin_batch, han_batch, mask in dataloader:
+        pinyin_batch = pinyin_batch.to(device)
+        han_batch = han_batch.to(device)
+        mask = mask.to(device)
 
-    X = torch.tensor([test_ids], device=device)
-    L = torch.tensor([valid_len_val], device=device)
+        optimizer.zero_grad()
+        logits = model(pinyin_batch)                     # (B, L, num_classes)
+        # 计算损失（忽略 pad_id=0）
+        loss = criterion(logits.permute(0, 2, 1), han_batch)  # (B, num_classes, L) vs (B, L)
+        # 应用 mask 只考虑有效位置
+        loss = (loss * mask).sum() / mask.sum()
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item() * mask.sum().item()
+        total_tokens += mask.sum().item()
+
+        # 计算准确率
+        preds = torch.argmax(logits, dim=-1)             # (B, L)
+        correct += (preds == han_batch).logical_and(mask).sum().item()
+
+    avg_loss = total_loss / total_tokens
+    accuracy = correct / total_tokens
+    return avg_loss, accuracy
+
+
+def eval_epoch(model, dataloader, criterion, device):
+    model.eval()
+    total_loss = 0
+    total_tokens = 0
+    correct = 0
 
     with torch.no_grad():
-        logits = net(X, L)
-        # 获取概率最大的 token ID
-        preds = logits.argmax(dim=2).squeeze(0)
+        for pinyin_batch, han_batch, mask in dataloader:
+            pinyin_batch = pinyin_batch.to(device)
+            han_batch = han_batch.to(device)
+            mask = mask.to(device)
 
-        # 只截取有效长度部分并转为词元
-        output_ids = preds[:valid_len_val].tolist()
+            logits = model(pinyin_batch)
+            loss = criterion(logits.permute(0, 2, 1), han_batch)
+            loss = (loss * mask).sum() / mask.sum()
 
-        # 过滤掉辅助词元
-        res_ids = [idx for idx in output_ids if idx not in [tgt_vocab.get_id('<pad>'), tgt_vocab.get_id('<eos>'), tgt_vocab.get_id('<sos>')]]
+            total_loss += loss.item() * mask.sum().item()
+            total_tokens += mask.sum().item()
 
-    return tgt_vocab.decode(res_ids)
+            preds = torch.argmax(logits, dim=-1)
+            correct += (preds == han_batch).logical_and(mask).sum().item()
 
+    avg_loss = total_loss / total_tokens
+    accuracy = correct / total_tokens
+    return avg_loss, accuracy
 
 if __name__ == '__main__':
     config = Config.from_json()
-    data_iter, source_vocab, target_vocab = load_data('./data/pinyin-zh-small.txt', config.batch_size, config.num_steps)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
 
-    # 模型参数
-    src_vocab_size = len(source_vocab)
-    tgt_vocab_size = len(target_vocab)
+    pinyin_seqs, han_seqs = read_data(config.data_path)
+    print(f"Loaded {len(pinyin_seqs)} samples")
 
-    net = BiGRU(
-        src_vocab_size,
-        tgt_vocab_size,
-        config
-    )
+    data_pairs = list(zip(pinyin_seqs, han_seqs))
+    pinyin_vocab, han_vocab = build_vocab_from_data(data_pairs)
+    print(f"Pinyin vocab size: {len(pinyin_vocab)}")
+    print(f"Han vocab size: {len(han_vocab)}")
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    full_dataset = PinyinHanDataset(pinyin_seqs, han_seqs, pinyin_vocab, han_vocab)
+    # 划分训练集和验证集（例如 90% 训练，10% 验证）
+    train_size = int(0.9 * len(full_dataset))
+    val_size = len(full_dataset) - train_size
+    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
-    num_epochs, lr = 30, 0.005
-    train(net, data_iter, lr, num_epochs, target_vocab, device)
+    train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=collate_fn)
 
-    # 简单测试
-    test_pinyin = ['ni', 'hao', 'shi', 'jie']
-    print(predict(net, test_pinyin, source_vocab, target_vocab, config.num_steps, device))
+    model = SimpleRnnTagger(len(pinyin_vocab), len(han_vocab), config)
+    model.to(device)
+
+    criterion = nn.CrossEntropyLoss(reduction='none')
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+
+    for epoch in range(1, config.num_epochs + 1):
+        train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device)
+        val_loss, val_acc = eval_epoch(model, val_loader, criterion, device)
+
+        print(f"Epoch {epoch:3d} | "
+              f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | "
+              f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")

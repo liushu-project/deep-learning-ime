@@ -3,6 +3,7 @@ from dataclasses import dataclass, fields
 
 @dataclass
 class Config:
+    data_path: str
     embed_size: int
     hidden_size: int
     num_layers: int
