@@ -132,6 +132,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device):
         # 应用 mask 只考虑有效位置
         loss = (loss * mask).sum() / mask.sum()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
         total_loss += loss.item() * mask.sum().item()
@@ -144,7 +145,6 @@ def train_epoch(model, dataloader, optimizer, criterion, device):
     avg_loss = total_loss / total_tokens
     accuracy = correct / total_tokens
     return avg_loss, accuracy
-
 
 def eval_epoch(model, dataloader, criterion, device):
     model.eval()
@@ -186,7 +186,7 @@ if __name__ == '__main__':
     print(f"Han vocab size: {len(han_vocab)}")
 
     full_dataset = PinyinHanDataset(pinyin_seqs, han_seqs, pinyin_vocab, han_vocab)
-    # 划分训练集和验证集（例如 90% 训练，10% 验证）
+    # 划分训练集和验证集（90% 训练，10% 验证）
     train_size = int(0.9 * len(full_dataset))
     val_size = len(full_dataset) - train_size
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
