@@ -2,17 +2,19 @@ import torch
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
+from config import Config
+
 class BiGRU(nn.Module):
-    def __init__(self, vocab_size, embed_size, hidden_size, num_layers, out_vocab_size, dropout=0.2):
+    def __init__(self, in_vocab_size: int, out_vocab_size: int, config: Config):
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_size)
+        self.embedding = nn.Embedding(in_vocab_size, config.embed_size)
 
         # bidirectional=True 开启双向
-        self.rnn = nn.GRU(embed_size, hidden_size, num_layers,
-                          dropout=dropout, batch_first=True, bidirectional=True)
+        self.rnn = nn.GRU(config.embed_size, config.hidden_size, config.num_layers,
+                          dropout=config.dropout, batch_first=True, bidirectional=True)
 
         # 因为是双向，GRU 输出的维度是 hidden_size * 2
-        self.classifier = nn.Linear(hidden_size * 2, out_vocab_size)
+        self.classifier = nn.Linear(config.hidden_size * 2, out_vocab_size)
 
     def forward(self, X, X_valid_len):
         # 1. Embedding

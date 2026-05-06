@@ -1,3 +1,4 @@
+from config import Config
 from models.gru import BiGRU
 from typing import Iterator
 from utils.vocabulary import LazyVocabulary
@@ -169,9 +170,8 @@ def predict(net, test_tokens, src_vocab, tgt_vocab, num_steps, device):
 
 
 if __name__ == '__main__':
-    src_embed_size, hidden_size, num_layers = 128, 256, 2
-    batch_size, num_steps = 64, 10
-    data_iter, source_vocab, target_vocab = load_data('./data/pinyin-zh-small.txt', batch_size, num_steps)
+    config = Config.from_json()
+    data_iter, source_vocab, target_vocab = load_data('./data/pinyin-zh-small.txt', config.batch_size, config.num_steps)
 
     # 模型参数
     src_vocab_size = len(source_vocab)
@@ -179,10 +179,8 @@ if __name__ == '__main__':
 
     net = BiGRU(
         src_vocab_size,
-        src_embed_size,
-        hidden_size,
-        num_layers,
-        tgt_vocab_size
+        tgt_vocab_size,
+        config
     )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -192,4 +190,4 @@ if __name__ == '__main__':
 
     # 简单测试
     test_pinyin = ['ni', 'hao', 'shi', 'jie']
-    print(predict(net, test_pinyin, source_vocab, target_vocab, num_steps, device))
+    print(predict(net, test_pinyin, source_vocab, target_vocab, config.num_steps, device))
