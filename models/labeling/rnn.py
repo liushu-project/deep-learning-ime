@@ -1,11 +1,12 @@
+from utils.vocabulary import Vocabulary
 from torch import nn
 
 from config import Config
 
 class SimpleRnnTagger(nn.Module):
-    def __init__(self, input_size: int, output_size: int, config: Config):
+    def __init__(self, in_vocab: Vocabulary, out_vocab: Vocabulary, config: Config):
         super().__init__()
-        self.embedding = nn.Embedding(input_size, config.embed_size)
+        self.embedding = nn.Embedding(len(in_vocab), config.embed_size, padding_idx=in_vocab.pad_id)
         self.rnn = nn.RNN(
             input_size=config.embed_size,
             hidden_size=config.hidden_size,
@@ -13,7 +14,7 @@ class SimpleRnnTagger(nn.Module):
             batch_first=True,
             dropout=0.2 if config.num_layers > 1 else 0.0
         )
-        self.classifier = nn.Linear(config.hidden_size, output_size)
+        self.classifier = nn.Linear(config.hidden_size, len(out_vocab))
 
     def forward(self, X):
         emb = self.embedding(X)

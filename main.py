@@ -1,4 +1,3 @@
-from models.labeling.rnn import SimpleRnnTagger
 from collections import Counter
 import torch
 from torch import nn
@@ -6,27 +5,8 @@ from torch.utils.data import TensorDataset, DataLoader, Dataset, random_split
 import csv
 
 from config import Config
-
-class Vocabulary:
-    def __init__(self):
-        self.id_to_token = ['<pad>']
-        self.token_to_id = {token: idx for idx, token in enumerate(self.id_to_token)}
-        self.pad_id = self.token_to_id['<pad>']
-
-    def add_token(self, token: str):
-        if token not in self.token_to_id:
-            idx = len(self.id_to_token)
-            self.token_to_id[token] = idx
-            self.id_to_token.append(token)
-
-    def __len__(self):
-        return len(self.id_to_token)
-
-    def encode(self, tokens: list[str]) -> list[int]:
-        return [self.token_to_id[token] for token in tokens]
-
-    def decode(self, ids: list[int]) -> list[str]:
-        return [self.id_to_token[i] for i in ids]
+from utils.vocabulary import Vocabulary
+from models.labeling.rnn import SimpleRnnTagger
 
 def build_vocab_from_data(data: list[tuple[list[str], list[str]]], min_freq=1) -> tuple[Vocabulary, Vocabulary]:
     """从数据中构建拼音和汉字词汇表"""
@@ -194,7 +174,7 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=collate_fn)
 
-    model = SimpleRnnTagger(len(pinyin_vocab), len(han_vocab), config)
+    model = SimpleRnnTagger(pinyin_vocab, han_vocab, config)
     model.to(device)
 
     criterion = nn.CrossEntropyLoss(reduction='none')

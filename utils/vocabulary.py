@@ -46,3 +46,25 @@ class LazyVocabulary:
 
     def __repr__(self):
         return f"{self.__class__.__name__}(size={len(self)}, reserved={self.reserved_tokens})"
+
+class Vocabulary:
+    def __init__(self):
+        self.id_to_token = ['<pad>']
+        self.token_to_id = {token: idx for idx, token in enumerate(self.id_to_token)}
+        self.pad_id = self.token_to_id['<pad>']
+
+    def add_token(self, token: str):
+        if token not in self.token_to_id:
+            idx = len(self.id_to_token)
+            self.token_to_id[token] = idx
+            self.id_to_token.append(token)
+
+    def __len__(self):
+        return len(self.id_to_token)
+
+    def encode(self, tokens: list[str]) -> list[int]:
+        return [self.token_to_id[token] for token in tokens]
+
+    def decode(self, ids: list[int]) -> list[str]:
+        return [self.id_to_token[i] for i in ids]
+
