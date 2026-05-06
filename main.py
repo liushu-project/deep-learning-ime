@@ -6,7 +6,7 @@ import csv
 
 from config import Config
 from utils.vocabulary import Vocabulary
-from models.labeling.rnn import SimpleRnnTagger
+from models.labeling.gru import BiGruTagger
 
 def build_vocab_from_data(data: list[tuple[list[str], list[str]]], min_freq=1) -> tuple[Vocabulary, Vocabulary]:
     """从数据中构建拼音和汉字词汇表"""
@@ -174,7 +174,7 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, collate_fn=collate_fn)
 
-    model = SimpleRnnTagger(pinyin_vocab, han_vocab, config)
+    model = BiGruTagger(pinyin_vocab, han_vocab, config)
     model.to(device)
 
     criterion = nn.CrossEntropyLoss(reduction='none')
