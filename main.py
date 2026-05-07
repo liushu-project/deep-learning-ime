@@ -1,8 +1,7 @@
 from collections import Counter
 import torch
 from torch import nn
-from torch.utils.data import TensorDataset, DataLoader, Dataset, random_split
-import csv
+from torch.utils.data import DataLoader, Dataset, random_split
 
 from config import Config
 from utils.vocabulary import Vocabulary
